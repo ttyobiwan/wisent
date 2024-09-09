@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -11,7 +12,11 @@ import (
 
 func TestHelloEndpoint(t *testing.T) {
 	a := &app{os.Getenv}
-	w := wisent.New("http://127.0.0.1:8080", a.start, "/health", nil)
+	w := wisent.New(
+		"http://127.0.0.1:8080",
+		wisent.WithStartFunc(a.start),
+		wisent.WithReadinessProbe(wisent.HealthCheckReadinessProbe("http://127.0.0.1:8080/health", nil)),
+	)
 
 	w.Test(t, []wisent.Test{
 		{
@@ -22,8 +27,6 @@ func TestHelloEndpoint(t *testing.T) {
 				w.AssertResponseStatusCode(t, http.StatusOK, resp)
 				w.AssertResponseBody(t, "Hello, World!", resp)
 			},
-			PreRequest:  func(req *http.Request) {},
-			PostRequest: func(resp *http.Response) {},
 		},
 		{
 			Name:    "POST hello 400",
@@ -32,15 +35,17 @@ func TestHelloEndpoint(t *testing.T) {
 				w.AssertResponseError(t, err)
 				w.AssertResponseStatusCode(t, http.StatusBadRequest, resp)
 			},
-			PreRequest:  func(req *http.Request) {},
-			PostRequest: func(resp *http.Response) {},
 		},
 	})
 }
 
 func BenchmarkHelloEndpoint(b *testing.B) {
 	a := &app{os.Getenv}
-	w := wisent.New("http://127.0.0.1:8080", a.start, "/health", nil)
+	w := wisent.New(
+		"http://127.0.0.1:8080",
+		wisent.WithStartFunc(a.start),
+		wisent.WithReadinessProbe(wisent.HealthCheckReadinessProbe("http://127.0.0.1:8080/health", nil)),
+	)
 
 	w.Benchmark(b, wisent.Benchmark{
 		Request: w.NewRequest("POST", "/hello", strings.NewReader(`{"name": "World"}`)),
@@ -49,7 +54,6 @@ func BenchmarkHelloEndpoint(b *testing.B) {
 			w.AssertResponseStatusCode(b, http.StatusOK, resp)
 			w.AssertResponseBody(b, "Hello, World!", resp)
 		},
-		PreRequest:  func(req *http.Request) {},
-		PostRequest: func(resp *http.Response) {},
+		PreRequest: func(req *http.Request) { slog.Info("Making request") },
 	})
 }

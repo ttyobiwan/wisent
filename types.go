@@ -6,8 +6,8 @@ import (
 )
 
 type (
-	StartFunc       func(context.Context) func(context.Context)
-	HealthCheckFunc func(context.Context) error
+	StartFunc      func(context.Context) func(context.Context)
+	ReadinessProbe func(context.Context) error
 )
 
 type Test struct {

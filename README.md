@@ -2,14 +2,8 @@
 
 Test and benchmark your APIs.
 
-Things to keep in mind:
+## Next
 
-- [ ] cancellation
-- [ ] port
-- [ ] http client
-- [ ] proper assertions
-- [ ] building requests
-- [ ] asserting expectations
-- [ ] build urls properly
-- [ ] perf
-- [ ] capture logging
+- [ ] Capture logging
+- [ ] Add retry policy
+- [ ] Limit amount of bm
