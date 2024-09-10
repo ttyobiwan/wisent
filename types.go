@@ -19,7 +19,8 @@ type Test struct {
 }
 
 type Benchmark struct {
-	Request        *http.Request
+	MaxIter        int
+	RequestF       func() *http.Request
 	PreRequest     func(req *http.Request)
 	AssertResponse func(resp *http.Response, err error)
 	PostRequest    func(resp *http.Response)

@@ -1,12 +1,11 @@
 package wisent
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 )
@@ -16,6 +15,7 @@ type Wisent struct {
 	Start          StartFunc
 	ReadinessProbe ReadinessProbe
 	HttpClient     *http.Client
+	Logger         *slog.Logger
 }
 
 type WisentOpt func(w *Wisent)
@@ -30,6 +30,10 @@ func WithHttpClient(client *http.Client) WisentOpt {
 	return func(w *Wisent) { w.HttpClient = client }
 }
 
+func WithLogger(logger *slog.Logger) WisentOpt {
+	return func(w *Wisent) { w.Logger = logger }
+}
+
 func New(baseUrl string, options ...WisentOpt) *Wisent {
 	w := &Wisent{BaseURL: baseUrl}
 	for _, opt := range options {
@@ -37,6 +41,9 @@ func New(baseUrl string, options ...WisentOpt) *Wisent {
 	}
 	if w.HttpClient == nil {
 		w.HttpClient = DefaultHttpClient()
+	}
+	if w.Logger == nil {
+		w.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	return w
 }
@@ -50,11 +57,14 @@ func (w *Wisent) NewRequest(method string, url string, body io.Reader) *http.Req
 }
 
 func (w *Wisent) Test(t *testing.T, tests []Test) error {
+	w.Logger.Info("Starting tests")
 	ctx, cancel := context.WithCancel(context.Background())
 
 	if w.Start != nil {
+		w.Logger.Info("Starting the app")
 		shutdown := w.Start(ctx)
 		defer func() {
+			w.Logger.Info("Shutting down")
 			cancel()
 			shutdown(ctx)
 		}()
@@ -63,31 +73,39 @@ func (w *Wisent) Test(t *testing.T, tests []Test) error {
 	}
 
 	if w.ReadinessProbe != nil {
+		w.Logger.Info("Starting the readiness probe")
 		w.ReadinessProbe(ctx)
 	}
 
 	for _, tt := range tests {
+		w.Logger.Info("Running the test", "name", tt.Name)
 		t.Run(tt.Name, func(t *testing.T) {
 			if tt.PreRequest != nil {
 				tt.PreRequest(tt.Request)
 			}
+			w.Logger.Info("Performing the request")
 			resp, err := w.HttpClient.Do(tt.Request)
 			if tt.PostRequest != nil {
 				tt.PostRequest(resp)
 			}
 			tt.AssertResponse(resp, err)
 		})
+		w.Logger.Info("Finished test", "name", tt.Name)
 	}
 
+	w.Logger.Info("Testing done")
 	return nil
 }
 
 func (w *Wisent) Benchmark(b *testing.B, bm Benchmark) error {
+	w.Logger.Info("Starting the benchmark")
 	ctx, cancel := context.WithCancel(context.Background())
 
 	if w.Start != nil {
+		w.Logger.Info("Starting the app")
 		shutdown := w.Start(ctx)
 		defer func() {
+			w.Logger.Info("Shutting down")
 			cancel()
 			shutdown(ctx)
 		}()
@@ -96,24 +114,19 @@ func (w *Wisent) Benchmark(b *testing.B, bm Benchmark) error {
 	}
 
 	if w.ReadinessProbe != nil {
+		w.Logger.Info("Starting the readiness probe")
 		w.ReadinessProbe(ctx)
-	}
-
-	var bodyBuffer bytes.Buffer
-	if bm.Request.Body != nil {
-		defer bm.Request.Body.Close()
-		_, err := io.Copy(&bodyBuffer, bm.Request.Body)
-		if err != nil {
-			return fmt.Errorf("reading request body: %w", err)
-		}
 	}
 
 	b.ResetTimer()
 
-	maxIterations := 10000 // TODO: Add that to bench
-	for i := 0; i < b.N && i < maxIterations; i++ {
-		req := copyRequest(ctx, bm.Request, bodyBuffer)
-
+	maxIter := bm.MaxIter
+	if maxIter == 0 {
+		maxIter = b.N
+	}
+	for i := 0; i < b.N && i < maxIter; i++ { // TODO: Test parallel
+		w.Logger.Info("Running the benchmark")
+		req := bm.RequestF()
 		if bm.PreRequest != nil {
 			bm.PreRequest(req)
 		}
@@ -121,23 +134,23 @@ func (w *Wisent) Benchmark(b *testing.B, bm Benchmark) error {
 		var resp *http.Response
 		var err error
 		for j := range 5 { // TODO: Custom strat
+			w.Logger.Info("Performing the request")
 			resp, err = w.HttpClient.Do(req)
 			if err == nil {
 				break
 			}
-			time.Sleep(time.Duration(j * j * 100 * int(time.Millisecond))) // TODO: retryFor
+			time.Sleep(time.Duration(j * j * 100 * int(time.Millisecond)))
 		}
 
 		if bm.PostRequest != nil {
 			bm.PostRequest(resp)
 		}
-
 		bm.AssertResponse(resp, err)
-
-		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
+		w.Logger.Info("Finished benchmark")
 	}
 
+	w.Logger.Info("Benchmarking done")
 	return nil
 }
 
@@ -162,15 +175,4 @@ func (w *Wisent) AssertResponseBody(tb testing.TB, expected string, resp *http.R
 	if string(actualBody) != expected {
 		tb.Fatalf("Body mismatch\nExpected: %s\nActual: %s", expected, actualBody)
 	}
-}
-
-func copyRequest(ctx context.Context, req *http.Request, body bytes.Buffer) *http.Request {
-	req, err := http.NewRequestWithContext(ctx, req.Method, req.URL.String(), strings.NewReader(body.String()))
-	if err != nil {
-		panic(fmt.Errorf("copying request: %v", err))
-	}
-	for k, v := range req.Header {
-		req.Header[k] = v
-	}
-	return req
 }

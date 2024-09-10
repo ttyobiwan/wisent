@@ -45,10 +45,11 @@ func BenchmarkHelloEndpoint(b *testing.B) {
 		"http://127.0.0.1:8080",
 		wisent.WithStartFunc(a.start),
 		wisent.WithReadinessProbe(wisent.HealthCheckReadinessProbe("http://127.0.0.1:8080/health", nil)),
+		wisent.WithLogger(slog.New(slog.NewTextHandler(os.Stdout, nil))),
 	)
 
 	w.Benchmark(b, wisent.Benchmark{
-		Request: w.NewRequest("POST", "/hello", strings.NewReader(`{"name": "World"}`)),
+		RequestF: func() *http.Request { return w.NewRequest("POST", "/hello", strings.NewReader(`{"name": "World"}`)) },
 		AssertResponse: func(resp *http.Response, err error) {
 			w.AssertResponseError(b, err)
 			w.AssertResponseStatusCode(b, http.StatusOK, resp)
