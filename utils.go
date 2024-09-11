@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var ErrHealthCheckTimeout = errors.New("health check timeout reached")
+
 func DefaultHttpClient() *http.Client {
 	return &http.Client{
 		Timeout: 3 * time.Second,
@@ -26,29 +28,33 @@ func DefaultHttpClient() *http.Client {
 	}
 }
 
-func HealthCheckReadinessProbe(url string, client *http.Client) ReadinessProbe {
-	return func(ctx context.Context) error {
-		if client == nil {
-			client = http.DefaultClient
-		}
-
+func HealthCheckReadinessProbe(url string, timeout time.Duration, sleep time.Duration) ReadinessProbe {
+	return func(ctx context.Context, w *Wisent) error {
 		startTime := time.Now()
-		timeout := 5 * time.Second
-
 		for {
+			w.Logger.Info("Checking readiness")
 			req, err := http.NewRequestWithContext(
 				ctx,
 				http.MethodGet,
-				url,
+				w.BaseURL+url,
 				nil,
 			)
 			if err != nil {
 				return fmt.Errorf("creating request: %w", err)
 			}
 
-			resp, err := client.Do(req)
+			resp, err := w.HttpClient.Do(req)
 			if err != nil {
-				continue
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					if time.Since(startTime) >= timeout {
+						return ErrHealthCheckTimeout
+					}
+					time.Sleep(sleep)
+					continue
+				}
 			}
 			resp.Body.Close()
 
@@ -61,10 +67,26 @@ func HealthCheckReadinessProbe(url string, client *http.Client) ReadinessProbe {
 				return ctx.Err()
 			default:
 				if time.Since(startTime) >= timeout {
-					return errors.New("timeout reached when waiting for readiness")
+					return ErrHealthCheckTimeout
 				}
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(sleep)
 			}
 		}
+	}
+}
+
+func SimpleRetry(maxAttempts int, baseSleep time.Duration) RequestWrapper {
+	return func(w *Wisent, req *http.Request) (resp *http.Response, err error) {
+		for i := range 5 {
+			w.Logger.Info("Performing the request")
+			resp, err = w.HttpClient.Do(req)
+			if err != nil {
+				w.Logger.Warn("Error performing request, sleeping", "err", err, "sleep", time.Duration(i*int(baseSleep)))
+				time.Sleep(time.Duration(i * int(baseSleep)))
+				continue
+			}
+			return resp, err
+		}
+		return nil, err
 	}
 }

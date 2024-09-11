@@ -31,10 +31,8 @@ func (a *app) start(ctx context.Context) (shutdown func(ctx context.Context)) {
 
 	// Return shutdown
 	return func(ctx context.Context) {
-		<-ctx.Done()
-
 		slog.Info("Shutting down")
-		shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {

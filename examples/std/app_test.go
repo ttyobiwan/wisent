@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ttyobiwan/wisent"
 )
@@ -15,7 +16,7 @@ func TestHelloEndpoint(t *testing.T) {
 	w := wisent.New(
 		"http://127.0.0.1:8080",
 		wisent.WithStartFunc(a.start),
-		wisent.WithReadinessProbe(wisent.HealthCheckReadinessProbe("http://127.0.0.1:8080/health", nil)),
+		wisent.WithReadinessProbe(wisent.HealthCheckReadinessProbe("/health", 5*time.Second, 100*time.Millisecond)),
 	)
 
 	w.Test(t, []wisent.Test{
@@ -44,8 +45,7 @@ func BenchmarkHelloEndpoint(b *testing.B) {
 	w := wisent.New(
 		"http://127.0.0.1:8080",
 		wisent.WithStartFunc(a.start),
-		wisent.WithReadinessProbe(wisent.HealthCheckReadinessProbe("http://127.0.0.1:8080/health", nil)),
-		wisent.WithLogger(slog.New(slog.NewTextHandler(os.Stdout, nil))),
+		wisent.WithReadinessProbe(wisent.HealthCheckReadinessProbe("/health", 5*time.Second, 100*time.Millisecond)),
 	)
 
 	w.Benchmark(b, wisent.Benchmark{
@@ -55,6 +55,29 @@ func BenchmarkHelloEndpoint(b *testing.B) {
 			w.AssertResponseStatusCode(b, http.StatusOK, resp)
 			w.AssertResponseBody(b, "Hello, World!", resp)
 		},
-		PreRequest: func(req *http.Request) { slog.Info("Making request") },
+	})
+}
+
+func BenchmarkParallelHelloEndpoint(b *testing.B) {
+	a := &app{os.Getenv}
+	slog.SetLogLoggerLevel(slog.LevelError)
+
+	w := wisent.New(
+		"http://127.0.0.1:8080",
+		wisent.WithStartFunc(a.start),
+		wisent.WithReadinessProbe(wisent.HealthCheckReadinessProbe("/health", 5*time.Second, 100*time.Millisecond)),
+		wisent.WithLogger(slog.New(slog.NewTextHandler(os.Stdout, nil))),
+		wisent.WithRequestWrapper(wisent.SimpleRetry(3, 100*time.Millisecond)),
+	)
+
+	w.BenchmarkParallel(b, wisent.Benchmark{
+		RequestF: func() *http.Request { return w.NewRequest("POST", "/hello", strings.NewReader(`{"name": "World"}`)) },
+		AssertResponse: func(resp *http.Response, err error) {
+			w.AssertResponseError(b, err)
+			w.AssertResponseStatusCode(b, http.StatusOK, resp)
+			w.AssertResponseBody(b, "Hello, World!", resp)
+		},
+		PreRequest:  func(req *http.Request) { slog.Info("Making request") },
+		PostRequest: func(resp *http.Response) { slog.Info("Done making request") },
 	})
 }

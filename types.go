@@ -7,7 +7,8 @@ import (
 
 type (
 	StartFunc      func(context.Context) func(context.Context)
-	ReadinessProbe func(context.Context) error
+	ReadinessProbe func(context.Context, *Wisent) error
+	RequestWrapper func(w *Wisent, req *http.Request) (*http.Response, error)
 )
 
 type Test struct {
@@ -19,7 +20,6 @@ type Test struct {
 }
 
 type Benchmark struct {
-	MaxIter        int
 	RequestF       func() *http.Request
 	PreRequest     func(req *http.Request)
 	AssertResponse func(resp *http.Response, err error)

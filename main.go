@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"testing"
-	"time"
 )
 
 type Wisent struct {
@@ -15,6 +14,7 @@ type Wisent struct {
 	Start          StartFunc
 	ReadinessProbe ReadinessProbe
 	HttpClient     *http.Client
+	RequestWrapper RequestWrapper
 	Logger         *slog.Logger
 }
 
@@ -28,6 +28,10 @@ func WithReadinessProbe(rp ReadinessProbe) WisentOpt {
 
 func WithHttpClient(client *http.Client) WisentOpt {
 	return func(w *Wisent) { w.HttpClient = client }
+}
+
+func WithRequestWrapper(rw RequestWrapper) WisentOpt {
+	return func(w *Wisent) { w.RequestWrapper = rw }
 }
 
 func WithLogger(logger *slog.Logger) WisentOpt {
@@ -66,7 +70,7 @@ func (w *Wisent) Test(t *testing.T, tests []Test) error {
 		defer func() {
 			w.Logger.Info("Shutting down")
 			cancel()
-			shutdown(ctx)
+			shutdown(context.Background())
 		}()
 	} else {
 		defer cancel()
@@ -74,23 +78,35 @@ func (w *Wisent) Test(t *testing.T, tests []Test) error {
 
 	if w.ReadinessProbe != nil {
 		w.Logger.Info("Starting the readiness probe")
-		w.ReadinessProbe(ctx)
+		w.ReadinessProbe(ctx, w)
 	}
 
 	for _, tt := range tests {
-		w.Logger.Info("Running the test", "name", tt.Name)
 		t.Run(tt.Name, func(t *testing.T) {
+			w.Logger.Info("Running the test", "name", tt.Name)
+
 			if tt.PreRequest != nil {
 				tt.PreRequest(tt.Request)
 			}
-			w.Logger.Info("Performing the request")
-			resp, err := w.HttpClient.Do(tt.Request)
+
+			var resp *http.Response
+			var err error
+			if w.RequestWrapper != nil {
+				resp, err = w.RequestWrapper(w, tt.Request)
+			} else {
+				w.Logger.Info("Performing the request")
+				resp, err = w.HttpClient.Do(tt.Request)
+			}
+
 			if tt.PostRequest != nil {
 				tt.PostRequest(resp)
 			}
+
 			tt.AssertResponse(resp, err)
+
+			resp.Body.Close()
+			w.Logger.Info("Finished test", "name", tt.Name)
 		})
-		w.Logger.Info("Finished test", "name", tt.Name)
 	}
 
 	w.Logger.Info("Testing done")
@@ -103,11 +119,69 @@ func (w *Wisent) Benchmark(b *testing.B, bm Benchmark) error {
 
 	if w.Start != nil {
 		w.Logger.Info("Starting the app")
+
 		shutdown := w.Start(ctx)
 		defer func() {
 			w.Logger.Info("Shutting down")
 			cancel()
 			shutdown(ctx)
+		}()
+
+	} else {
+		defer cancel()
+	}
+
+	if w.ReadinessProbe != nil {
+		w.Logger.Info("Starting the readiness probe")
+		w.ReadinessProbe(ctx, w)
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		w.Logger.Info("Running the benchmark")
+
+		req := bm.RequestF()
+
+		if bm.PreRequest != nil {
+			bm.PreRequest(req)
+		}
+
+		var resp *http.Response
+		var err error
+		if w.RequestWrapper != nil {
+			resp, err = w.RequestWrapper(w, req)
+		} else {
+			w.Logger.Info("Performing the request")
+			resp, err = w.HttpClient.Do(req)
+		}
+
+		if bm.PostRequest != nil {
+			bm.PostRequest(resp)
+		}
+
+		bm.AssertResponse(resp, err)
+
+		resp.Body.Close()
+		w.Logger.Info("Finished benchmark")
+	}
+
+	w.Logger.Info("Benchmarking done")
+	return nil
+}
+
+func (w *Wisent) BenchmarkParallel(b *testing.B, bm Benchmark) error {
+	w.Logger.Info("Starting the parallel benchmark")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	if w.Start != nil {
+		w.Logger.Info("Starting the app")
+
+		shutdown := w.Start(ctx)
+		defer func() {
+			w.Logger.Info("Shutting down")
+			cancel()
+			shutdown(context.Background())
 		}()
 	} else {
 		defer cancel()
@@ -115,40 +189,40 @@ func (w *Wisent) Benchmark(b *testing.B, bm Benchmark) error {
 
 	if w.ReadinessProbe != nil {
 		w.Logger.Info("Starting the readiness probe")
-		w.ReadinessProbe(ctx)
+		w.ReadinessProbe(ctx, w)
 	}
 
 	b.ResetTimer()
 
-	maxIter := bm.MaxIter
-	if maxIter == 0 {
-		maxIter = b.N
-	}
-	for i := 0; i < b.N && i < maxIter; i++ { // TODO: Test parallel
-		w.Logger.Info("Running the benchmark")
-		req := bm.RequestF()
-		if bm.PreRequest != nil {
-			bm.PreRequest(req)
-		}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			w.Logger.Info("Running the benchmark")
 
-		var resp *http.Response
-		var err error
-		for j := range 5 { // TODO: Custom strat
-			w.Logger.Info("Performing the request")
-			resp, err = w.HttpClient.Do(req)
-			if err == nil {
-				break
+			req := bm.RequestF()
+
+			if bm.PreRequest != nil {
+				bm.PreRequest(req)
 			}
-			time.Sleep(time.Duration(j * j * 100 * int(time.Millisecond)))
-		}
 
-		if bm.PostRequest != nil {
-			bm.PostRequest(resp)
+			var resp *http.Response
+			var err error
+			if w.RequestWrapper != nil {
+				resp, err = w.RequestWrapper(w, req)
+			} else {
+				w.Logger.Info("Performing the request")
+				resp, err = w.HttpClient.Do(req)
+			}
+
+			if bm.PostRequest != nil {
+				bm.PostRequest(resp)
+			}
+
+			bm.AssertResponse(resp, err)
+
+			resp.Body.Close()
+			w.Logger.Info("Finished benchmark")
 		}
-		bm.AssertResponse(resp, err)
-		resp.Body.Close()
-		w.Logger.Info("Finished benchmark")
-	}
+	})
 
 	w.Logger.Info("Benchmarking done")
 	return nil
