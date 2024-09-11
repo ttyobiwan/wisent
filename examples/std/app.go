@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"os/signal"
 	"time"
 )
 
@@ -17,8 +15,7 @@ type app struct {
 }
 
 func (a *app) start(ctx context.Context) (shutdown func(ctx context.Context)) {
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	defer cancel()
+	slog.Info("Starting the app")
 
 	// Start server
 	server := a.getServer()
@@ -32,6 +29,7 @@ func (a *app) start(ctx context.Context) (shutdown func(ctx context.Context)) {
 	// Return shutdown
 	return func(ctx context.Context) {
 		slog.Info("Shutting down")
+
 		shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
@@ -85,13 +83,13 @@ func (a *app) getServer() *http.Server {
 
 	return &http.Server{
 		Addr:         ":" + port,
-		Handler:      a.loggingMiddleware(mux),
+		Handler:      loggingMiddleware(mux),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
 }
 
-func (a *app) loggingMiddleware(next http.Handler) http.Handler {
+func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		slog.Info("Request started", "method", r.Method, "path", r.URL.Path)

@@ -6,7 +6,8 @@ import (
 )
 
 type (
-	StartFunc      func(context.Context) func(context.Context)
+	StartFunc      ShutdownFunc
+	ShutdownFunc   func(context.Context) func(context.Context)
 	ReadinessProbe func(context.Context, *Wisent) error
 	RequestWrapper func(w *Wisent, req *http.Request) (*http.Response, error)
 )
