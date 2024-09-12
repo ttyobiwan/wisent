@@ -1,5 +1,7 @@
 # 🦬 wisent
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/ttyobiwan/wisent)](https://goreportcard.com/report/github.com/ttyobiwan/wisent)
+
 Wisent is a Go library designed for testing and benchmarking APIs. It provides a flexible and easy-to-use framework for setting up, running, and asserting HTTP-based API tests and benchmarks.
 
 Wisent has no external dependecies. It uses Go standard library and native benchmarking.
