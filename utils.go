@@ -9,8 +9,11 @@ import (
 	"time"
 )
 
+// ErrHealthCheckTimeout is returned when the health check fails to complete within the specified timeout period.
 var ErrHealthCheckTimeout = errors.New("health check timeout reached")
 
+// DefaultHttpClient returns a pre-configured http.Client with specific timeout and connection settings.
+// This client is suitable for making HTTP requests with consistent timeout behavior and connection reuse.
 func DefaultHttpClient() *http.Client {
 	return &http.Client{
 		Timeout: 3 * time.Second,
@@ -28,6 +31,15 @@ func DefaultHttpClient() *http.Client {
 	}
 }
 
+// HealthCheckReadinessProbe creates a ReadinessProbe function that performs HTTP health checks.
+//
+// It sends GET requests to the specified URL at regular intervals until either:
+// - A successful response (HTTP 200 OK) is received
+// - The context is cancelled
+// - The specified timeout duration is reached
+//
+// The returned function will return nil if the health check succeeds, or an error
+// if the health check fails due to timeout or context cancellation.
 func HealthCheckReadinessProbe(url string, timeout time.Duration, sleep time.Duration) ReadinessProbe {
 	return func(ctx context.Context, w *Wisent) error {
 		startTime := time.Now()
@@ -75,6 +87,12 @@ func HealthCheckReadinessProbe(url string, timeout time.Duration, sleep time.Dur
 	}
 }
 
+// SimpleRetry creates a RequestWrapper that implements a simple retry mechanism for HTTP requests.
+//
+// It attempts to perform the request up to 'maxAttempts' times, with an increasing delay between each attempt.
+// The delay starts at 'baseSleep' and increases linearly with each retry.
+//
+// The wrapper logs each attempt and any errors encountered. If all attempts fail, it returns the last error encountered.
 func SimpleRetry(maxAttempts int, baseSleep time.Duration) RequestWrapper {
 	return func(w *Wisent, req *http.Request) (resp *http.Response, err error) {
 		for i := range 5 {

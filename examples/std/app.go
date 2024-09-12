@@ -14,7 +14,7 @@ type app struct {
 	getenv func(string) string
 }
 
-func (a *app) start(ctx context.Context) (shutdown func(ctx context.Context)) {
+func (a *app) start(ctx context.Context) (shutdown func(context.Context)) {
 	slog.Info("Starting the app")
 
 	// Start server

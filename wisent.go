@@ -9,15 +9,6 @@ import (
 	"testing"
 )
 
-type Wisent struct {
-	BaseURL        string
-	Start          StartFunc
-	ReadinessProbe ReadinessProbe
-	HttpClient     *http.Client
-	RequestWrapper RequestWrapper
-	Logger         *slog.Logger
-}
-
 type WisentOpt func(w *Wisent)
 
 func WithStartFunc(start StartFunc) WisentOpt { return func(w *Wisent) { w.Start = start } }
@@ -38,6 +29,34 @@ func WithLogger(logger *slog.Logger) WisentOpt {
 	return func(w *Wisent) { w.Logger = logger }
 }
 
+// Wisent represents a configuration for running API tests and benchmarks.
+// It provides a flexible way to set up and execute HTTP requests against a target API.
+type Wisent struct {
+	// BaseURL specifies base url for all requests.
+	BaseURL string
+	// Start is a function that starts the application under test.
+	// It returns a shutdown function that will be called when the test is complete.
+	// If Start is not provided, the test will run against an already running application.
+	Start StartFunc
+	// ReadinessProbe is a function that checks if the application is ready to receive requests.
+	// It should block until the application is ready.
+	// If empty, no readiness probe is done.
+	ReadinessProbe ReadinessProbe
+	// HttpClient is the HTTP client used to make requests.
+	// If not provided, a default client will be used.
+	HttpClient *http.Client
+	// RequestWrapper is a function that wraps the HTTP request.
+	// It can be used to modify the logic around making request.
+	// An example could be applying retry policy.
+	// If empty, only HttpClient.Do will be called.
+	RequestWrapper RequestWrapper
+	// Logger is used for logging test progress and information.
+	// If not provided, a default logger writing to io.Discard will be used.
+	Logger *slog.Logger
+}
+
+// New creates and returns a new Wisent instance with the specified base URL and options.
+// It applies the provided options to customize the Wisent instance.
 func New(baseUrl string, options ...WisentOpt) *Wisent {
 	w := &Wisent{BaseURL: baseUrl}
 	for _, opt := range options {
@@ -52,6 +71,8 @@ func New(baseUrl string, options ...WisentOpt) *Wisent {
 	return w
 }
 
+// NewRequest is a helper method that allows building requests without checking for errors.
+// This is handy in tests, where we (usually) know what we are doing.
 func (w *Wisent) NewRequest(method string, url string, body io.Reader) *http.Request {
 	req, err := http.NewRequest(method, w.BaseURL+url, body)
 	if err != nil {
@@ -60,6 +81,9 @@ func (w *Wisent) NewRequest(method string, url string, body io.Reader) *http.Req
 	return req
 }
 
+// Test runs a series of tests against the configured API.
+// It takes a testing.T instance and a slice of Test structs.
+// For each Test, it executes the HTTP request and runs the associated assertions.
 func (w *Wisent) Test(t *testing.T, tests []Test) error {
 	w.Logger.Info("Starting tests")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -113,6 +137,10 @@ func (w *Wisent) Test(t *testing.T, tests []Test) error {
 	return nil
 }
 
+// Benchmark runs a benchmark test against the configured API.
+// It takes a testing.B instance and a Benchmark struct.
+// For each iteration, it executes the HTTP request and runs the associated assertions.
+// The benchmark measures the performance of the API under test.
 func (w *Wisent) Benchmark(b *testing.B, bm Benchmark) error {
 	w.Logger.Info("Starting the benchmark")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -170,6 +198,11 @@ func (w *Wisent) Benchmark(b *testing.B, bm Benchmark) error {
 	return nil
 }
 
+// BenchmarkParallel runs a parallel benchmark test against the configured API.
+// It takes a testing.B instance and a Benchmark struct.
+// For each goroutine, it repeatedly executes the HTTP request and runs the associated assertions.
+// The benchmark measures the performance of the API under test in a concurrent scenario.
+// This method is suitable for simulating high concurrency and measuring how the API performs under parallel load.
 func (w *Wisent) BenchmarkParallel(b *testing.B, bm Benchmark) error {
 	w.Logger.Info("Starting the parallel benchmark")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -228,18 +261,21 @@ func (w *Wisent) BenchmarkParallel(b *testing.B, bm Benchmark) error {
 	return nil
 }
 
+// AssertResponseError is a testing helper method that checks if response error is empty.
 func (w *Wisent) AssertResponseError(tb testing.TB, err error) {
 	if err != nil {
 		tb.Fatalf("Error performing the request: %v", err)
 	}
 }
 
+// AssertResponseStatusCode is a testing helper method that compares response status code.
 func (w *Wisent) AssertResponseStatusCode(tb testing.TB, expected int, resp *http.Response) {
 	if resp.StatusCode != expected {
 		tb.Fatalf("Incorrect status code, got: %v, want: %v", resp.StatusCode, expected)
 	}
 }
 
+// AssertResponseBody is a testing helper method that compares response body.
 func (w *Wisent) AssertResponseBody(tb testing.TB, expected string, resp *http.Response) {
 	actualBody, err := io.ReadAll(resp.Body)
 	if err != nil {
